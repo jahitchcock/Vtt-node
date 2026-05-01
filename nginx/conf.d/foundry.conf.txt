@@ -1,0 +1,45 @@
+# =============================================================================
+# VTT-Node | nginx/conf.d/foundry.conf
+# =============================================================================
+
+upstream vtt_engine { server vtt-foundry:30000; keepalive 32; }
+
+server {
+    listen 80;
+    server_name _;
+
+    add_header X-Frame-Options SAMEORIGIN;
+    add_header X-Content-Type-Options nosniff;
+    add_header Referrer-Policy no-referrer-when-downgrade;
+
+    location /vtt-node/ {
+        proxy_pass http://vtt-ui-backend:8000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        limit_req zone=api burst=20 nodelay;
+    }
+
+    location /vtt-node/upload {
+        proxy_pass http://vtt-ui-backend:8000/upload;
+        proxy_set_header Host $host;
+        client_max_body_size 500M;
+        proxy_read_timeout 300s;
+        limit_req zone=upload burst=3 nodelay;
+    }
+
+    location / {
+        proxy_pass http://vtt_engine;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 18000s;
+        proxy_send_timeout 18000s;
+        proxy_connect_timeout 60s;
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+}
