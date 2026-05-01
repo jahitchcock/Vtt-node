@@ -1,0 +1,120 @@
+# =============================================================================
+# VTT-Node | docker-compose.yml
+# Shared infrastructure: Nginx, Cloudflare Tunnel, Management UI, Backups
+#
+# Usage:
+#   Foundry:  docker compose -f docker-compose.yml -f engines/foundry.yml up -d
+#   MapTool:  docker compose -f docker-compose.yml -f engines/maptool.yml up -d
+#
+# Or just run: ./bootstrap.sh
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # NGINX — Reverse proxy, WebSocket support, large upload handling
+  # ---------------------------------------------------------------------------
+  nginx-proxy:
+    image: nginx:1.27-alpine
+    container_name: vtt-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx /nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - vtt_data:/data:ro           # read-only access for serving static assets
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - vtt-engine                  # defined in engine overlay
+    networks:
+      - vtt-internal
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # CLOUDFLARE TUNNEL — Zero-config public URL, no port forwarding required
+  # ---------------------------------------------------------------------------
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: vtt-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - nginx-proxy
+    networks:
+      - vtt-internal
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "info"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 10s
+
+  vtt-ui:
+    image: vtt-node/ui-backend:latest
+    build:
+      context: ./vtt-ui
+      dockerfile: Dockerfile
+    container_name: vtt-ui-backend
+    restart: unless-stopped
+    environment:
+      - VTT_ENGINE=${VTT_ENGINE:-foundry}
+      - VTT_DATA_PATH=/data
+      - API_SECRET=${VTT_UI_SECRET}
+      - BACKUP_S3_BUCKET=${BACKUP_S3_BUCKET:-}
+      - BACKUP_S3_ENDPOINT=${BACKUP_S3_ENDPOINT:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - vtt_data:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - vtt-internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backup:
+    image: offen/docker-volume-backup:v2
+    container_name: vtt-backup
+    restart: unless-stopped
+    environment:
+      - BACKUP_CRON_EXPRESSION=0 2 * * *
+      - BACKUP_FILENAME=vtt-node-backup-%Y-%m-%dT%H-%M-%S.tar.gz
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
+      - GPG_PASSPHRASE=${BACKUP_GPG_PASSPHRASE:-}
+      - AWS_S3_BUCKET_NAME=${BACKUP_S3_BUCKET:-}
+      - AWS_ACCESS_KEY_ID=${BACKUP_S3_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${BACKUP_S3_SECRET:-}
+      - AWS_ENDPOINT=${BACKUP_S3_ENDPOINT:-}
+    volumes:
+      - vtt_data:/backup/vtt_data:ro
+      - vtt_backups:/archive
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - vtt-internal
+
+volumes:
+  vtt_data:
+    name: vtt_data
+    driver: local
+  vtt_backups:
+    name: vtt_backups
+    driver: local
+  nginx_logs:
+    name: nginx_logs
+    driver: local
+
+networks:
+  vtt-internal:
+    name: vtt-internal
+    driver: bridge
