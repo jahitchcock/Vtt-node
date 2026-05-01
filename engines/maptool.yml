@@ -1,0 +1,46 @@
+# =============================================================================
+# VTT-Node | engines/maptool.yml
+# =============================================================================
+
+services:
+  vtt-engine:
+    build:
+      context: ./engines/maptool-docker
+      dockerfile: Dockerfile
+    image: vtt-node/maptool:${MAPTOOL_VERSION:-1.14.0}
+    container_name: vtt-maptool
+    hostname: maptool
+    restart: unless-stopped
+    environment:
+      - MAPTOOL_VERSION=${MAPTOOL_VERSION:-1.14.0}
+      - MT_SERVER_NAME=${MT_SERVER_NAME:-VTT-Node Campaign}
+      - MT_SERVER_PASSWORD=${MT_SERVER_PASSWORD}
+      - MT_GM_PASSWORD=${MT_GM_PASSWORD}
+      - MT_PORT=51234
+      - MT_MAX_CONNECTIONS=${MT_MAX_CONNECTIONS:-10}
+      - MT_STRICT_TOKEN_OWNERSHIP=${MT_STRICT_TOKEN_OWNERSHIP:-true}
+      - MT_PLAYERS_CAN_REVEAL_FOG=${MT_PLAYERS_CAN_REVEAL_FOG:-false}
+      - DISPLAY=:99
+      - JAVA_OPTS=-Xmx${MT_HEAP_MB:-2048}m
+      - TZ=${TZ:-UTC}
+    volumes:
+      - vtt_data:/data/maptool
+    expose:
+      - "51234"
+      - "5900"
+      - "6080"
+    ports:
+      - "127.0.0.1:5900:5900"
+      - "127.0.0.1:6080:6080"
+    networks:
+      - vtt-internal
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "51234"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  nginx-proxy:
+    volumes:
+      - ./nginx/conf.d/maptool.conf:/etc/nginx/conf.d/vtt-engine.conf:ro

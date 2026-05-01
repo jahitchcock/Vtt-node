@@ -1,0 +1,37 @@
+# =============================================================================
+# VTT-Node | engines/foundry.yml
+# =============================================================================
+
+services:
+  vtt-engine:
+    image: felddy/foundryvtt:${FOUDRY_VERSION:-release}
+    container_name: vtt-foundry
+    hostname: foundry
+    restart: unless-stopped
+    init: true
+    environment:
+      - FOUNDRY_USERNAME=${FOUNDRY_USERNAME}
+      - FOUNDRY_PASSWORD=${FOUNDRY_PASSWORD}
+      - FOUNDRY_LICENSE_KEY=${FOUNDRY_LICENSE_KEY}
+      - FOUNDRY_ADMIN_KEY=${FOUNDRY_ADMIN_KEY}
+      - FOUNDRY_WORLD=${FOUNDRY_DEFAULT_WORLD:-}
+      - FOUNDRY_MINIFY_STATIC_FILES=true
+      - FOUNDRY_UPNP=false
+      - CONTAINER_PRESERVE_CONFIG=true
+      - TIMEZONE=${TZ:-UTC}
+    volumes:
+      - vtt_data:/data
+    expose:
+      - "30000"
+    networks:
+      - vtt-internal
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:30000/"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+
+  nginx-proxy:
+    volumes:
+      - ./nginx/conf.d/foundry.conf:/etc/nginx/conf.d/vtt-engine.conf:ro
